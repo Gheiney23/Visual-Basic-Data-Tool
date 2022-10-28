@@ -1,0 +1,123 @@
+Option Explicit
+'Creating a function to pull SQL results from SQLServer
+Public Function GetDataFromSQLServer()
+    Dim conn As ADODB.Connection
+    Dim rs As ADODB.Recordset
+    Dim manufacturer As Range
+    Dim upcList As Range
+    Dim SQLQuery1 As String
+    Dim SQLQuery2 As String
+    Dim wb As Workbook: Set wb = ThisWorkbook
+    Dim ws As Worksheet: Set ws = ActiveWorkbook.Sheets("Data_Tool")
+    Dim strValue As String
+    Dim strArray() As Variant
+    Dim i As Integer
+    Dim fld As Variant
+    
+    
+    'Creating a connection to the DB
+    Set conn = New ADODB.Connection
+    conn.ConnectionString = "Connection_String"
+    conn.Open
+    
+    'Setting up the recorsed permissions
+    Set rs = New ADODB.Recordset
+    rs.ActiveConnection = conn
+    rs.CursorType = adOpenStatic
+
+    'Setting the variables to be used as parameters
+    Set manufacturer = ws.Range("B7")
+    Set upcList = ws.Range("B8")
+'    Set filePath = ws.Range("B9").Value
+    
+    SQLQuery1 = "SELECT DISTINCT ps.optionname " & _
+                "FROM product_specs AS ps (NOLOCK) " & _
+                "LEFT JOIN product AS p (NOLOCK) " & _
+                "ON ps.productid = p.productid " & _
+                "AND p.manufacturer = ps.manufacturer " & _
+                "WHERE ps.manufacturer = '" & manufacturer & "' " & _
+                "AND p.upc IN" & upcList & "; "
+    
+    'Setting the Recordset variable to be used in the CTE
+    rs.Open SQLQuery1, conn, adOpenStatic
+    
+    'Creating a loop to update the first recordset to SQL format and append each update as a parameter to the second query
+    i = 0
+    ReDim Preserve strArray(i)
+    Do While Not rs.EOF
+        For Each fld In rs.Fields
+            ReDim Preserve strArray(0 To i)
+            strValue = rs.Fields("optionname").Value
+            strValue = "[" & strValue & "], "
+            rs.MoveNext
+            If rs.EOF Then
+                strValue = Replace(strValue, ",", "")
+                strValue = Replace(strValue, " ", "")
+            End If
+            strArray(i) = strValue
+            i = i + 1
+        Next
+    Loop
+    
+    
+    SQLQuery2 = "WITH SPECS AS( " & _
+                   "SELECT " & _
+                       "p.uniqueid, " & _
+                       "p.upc, " & _
+                       "p.manufacturer, " & _
+                       "p.sku, " & _
+                       "p.finish, " & _
+                       "p.image, " & _
+                       "p.weight, " & _
+                       "ps.optionname, " & _
+                       "ps.optionvalue " & _
+                   "FROM product AS p (NOLOCK) " & _
+                   "INNER JOIN product_specs AS ps (NOLOCK) " & _
+                   "ON p.productid = ps.productid " & _
+                   "AND p.manufacturer = ps.manufacturer " & _
+                   "WHERE p.manufacturer = '" & manufacturer & "' " & _
+                   "AND p.upc IN" & upcList & ") " & _
+               "SELECT * " & _
+               "FROM SPECS " & _
+               "PIVOT " & _
+                   "(MAX(optionvalue) " & _
+                    "FOR optionname IN(" & Join(strArray, "") & ")) " & _
+               "AS pvt"
+    
+    'Close the first Recordset and open the second
+    rs.Close
+    rs.Open SQLQuery2, conn
+    
+    'Write the second recordset to Excel
+    WriteResultsToExcel rs
+    conn.Close
+    
+End Function
+
+'Creating a Sub to write the function results to an Excel worksheet
+Sub WriteResultsToExcel(Results As ADODB.Recordset)
+    Dim ws As Worksheet
+    Dim c As Long
+    Dim i As Integer
+    Dim fld As Variant
+    
+    'Creating the new worksheet and naming it
+    Set ws = Worksheets.Add
+    ws.Select
+    ws.Name = "Build_Data"
+     ws.ListObjects.Add(SourceType:=xlSrcRange).Name = "Build_Data"
+
+    ' Adding in the Column headers and making them bold
+      For c = 1 To Results.Fields.Count
+        With ws.Cells(1, c)
+            .Value = Results.Fields(c - 1).Name
+            .Font.Bold = True
+        End With
+      Next c
+
+    'Adding the SQL Pivot results to the new worksheet
+    ws.Range("A2").CopyFromRecordset Results
+    
+   
+End Sub
+
