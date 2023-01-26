@@ -7,6 +7,8 @@ Public Function GetDataFromSQLServer()
     Dim upcList As Range
     Dim SQLQuery1 As String
     Dim SQLQuery2 As String
+    Dim SQLQuery3 As String
+    Dim SQLQuery4 As String
     Dim wb As Workbook: Set wb = ThisWorkbook
     Dim ws As Worksheet: Set ws = ActiveWorkbook.Sheets("Data_Tool")
     Dim strValue As String
@@ -17,7 +19,8 @@ Public Function GetDataFromSQLServer()
     
     'Creating a connection to the DB
     Set conn = New ADODB.Connection
-    conn.ConnectionString = "Connection_String"
+    conn.ConnectionString = "connection_string_here"
+    conn.CommandTimeout = 0
     conn.Open
     
     'Setting up the recorsed permissions
@@ -30,16 +33,33 @@ Public Function GetDataFromSQLServer()
     Set upcList = ws.Range("B8")
 '    Set filePath = ws.Range("B9").Value
     
-    SQLQuery1 = "SELECT DISTINCT ps.optionname " & _
-                "FROM product_specs AS ps (NOLOCK) " & _
+    SQLQuery1 = "SELECT DISTINCT ps.o_name " & _
+                "FROM p_specs AS ps (NOLOCK) " & _
                 "LEFT JOIN product AS p (NOLOCK) " & _
-                "ON ps.productid = p.productid " & _
+                "ON ps.id = p.pid " & _
                 "AND p.manufacturer = ps.manufacturer " & _
                 "WHERE ps.manufacturer = '" & manufacturer & "' " & _
                 "AND p.upc IN" & upcList & "; "
     
+    SQLQuery2 = "SELECT DISTINCT ps.o_name " & _
+                "FROM p_specs AS ps (NOLOCK) " & _
+                "LEFT JOIN product AS p (NOLOCK) " & _
+                "ON ps.pid = p.pid " & _
+                "AND p.manufacturer = ps.manufacturer " & _
+                "WHERE ps.manufacturer IN" & manufacturer & " " & _
+                "AND p.upc IN" & upcList & "; "
+    
     'Setting the Recordset variable to be used in the CTE
-    rs.Open SQLQuery1, conn, adOpenStatic
+    If InStr(1, manufacturer, "(") = 1 Then
+        rs.Open SQLQuery2, conn, adOpenStatic
+    Else
+        rs.Open SQLQuery1, conn, adOpenStatic
+    End If
+    
+    'If no results print the message
+    If rs.EOF Or rs.EOF Then
+        MsgBox ("No records found.")
+    End If
     
     'Creating a loop to update the first recordset to SQL format and append each update as a parameter to the second query
     i = 0
@@ -59,36 +79,66 @@ Public Function GetDataFromSQLServer()
         Next
     Loop
     
-    
-    SQLQuery2 = "WITH SPECS AS( " & _
+    SQLQuery3 = "WITH SPECS AS( " & _
                    "SELECT " & _
-                       "p.uniqueid, " & _
+                       "p.id, " & _
                        "p.upc, " & _
                        "p.manufacturer, " & _
+                       "p.pid, " & _
+                       "p.Title, " & _
                        "p.sku, " & _
                        "p.finish, " & _
                        "p.image, " & _
                        "p.weight, " & _
-                       "ps.optionname, " & _
-                       "ps.optionvalue " & _
+                       "ps.o_name, " & _
+                       "ps.o_value " & _
                    "FROM product AS p (NOLOCK) " & _
-                   "INNER JOIN product_specs AS ps (NOLOCK) " & _
-                   "ON p.productid = ps.productid " & _
+                   "INNER JOIN p_specs AS ps (NOLOCK) " & _
+                   "ON p.pid = ps.pid " & _
                    "AND p.manufacturer = ps.manufacturer " & _
                    "WHERE p.manufacturer = '" & manufacturer & "' " & _
                    "AND p.upc IN" & upcList & ") " & _
                "SELECT * " & _
                "FROM SPECS " & _
                "PIVOT " & _
-                   "(MAX(optionvalue) " & _
-                    "FOR optionname IN(" & Join(strArray, "") & ")) " & _
+                   "(MAX(o_value) " & _
+                    "FOR o_name IN(" & Join(strArray, "") & ")) " & _
                "AS pvt"
     
-    'Close the first Recordset and open the second
-    rs.Close
-    rs.Open SQLQuery2, conn
-    
-    'Write the second recordset to Excel
+    SQLQuery4 = "WITH SPECS AS( " & _
+                   "SELECT " & _
+                       "p.id, " & _
+                       "p.upc, " & _
+                       "p.manufacturer, " & _
+                       "p.pid, " & _
+                       "p.Title, " & _
+                       "p.sku, " & _
+                       "p.finish, " & _
+                       "p.image, " & _
+                       "p.weight, " & _
+                       "ps.o_name, " & _
+                       "ps.o_value " & _
+                   "FROM product AS p (NOLOCK) " & _
+                   "INNER JOIN p_specs AS ps (NOLOCK) " & _
+                   "ON p.pid = ps.pid " & _
+                   "AND p.manufacturer = ps.manufacturer " & _
+                   "WHERE p.manufacturer IN" & manufacturer & " " & _
+                   "AND p.upc IN" & upcList & ") " & _
+               "SELECT * " & _
+               "FROM SPECS " & _
+               "PIVOT " & _
+                   "(MAX(o_value) " & _
+                    "FOR o_name IN(" & Join(strArray, "") & ")) " & _
+               "AS pvt"
+    If InStr(1, manufacturer, "(") = 1 Then
+        rs.Close
+        rs.Open SQLQuery4, conn
+    Else
+        rs.Close
+        rs.Open SQLQuery3, conn
+    End If
+        
+   'Write the second recordset to Excel
     WriteResultsToExcel rs
     conn.Close
     
@@ -104,7 +154,7 @@ Sub WriteResultsToExcel(Results As ADODB.Recordset)
     'Creating the new worksheet and naming it
     Set ws = Worksheets.Add
     ws.Select
-    ws.Name = "Build_Data"
+'    ws.Name = "Build_Data"
      ws.ListObjects.Add(SourceType:=xlSrcRange).Name = "Build_Data"
 
     ' Adding in the Column headers and making them bold
